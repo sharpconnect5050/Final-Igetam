@@ -19,7 +19,7 @@ const limiter = rateLimit({
   max: Number(process.env.MAX_DOWNLOADS_PER_MINUTE) || 10,
   message: { error: 'Too many requests. Please slow down.' },
 });
-app.use('/api/', limiter);
+app.use('/api', limiter);
 
 app.use('/api', downloadRouter);
 
