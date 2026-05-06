@@ -1,6 +1,6 @@
 {
   "name": "igetam-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
     "build": "tsc",
