@@ -1,4 +1,4 @@
-import youtubeDl from 'youtube-dl-exec';
+const youtubeDl = require('youtube-dl-exec');
 import { Response } from 'express';
 
 export interface VideoInfo {
