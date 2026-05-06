@@ -19,12 +19,22 @@ const limiter = rateLimit({
   max: Number(process.env.MAX_DOWNLOADS_PER_MINUTE) || 10,
   message: { error: 'Too many requests. Please slow down.' },
 });
-app.use('/api', limiter);
-
+app.use('/api/', limiter);
 app.use('/api', downloadRouter);
 
 app.get('/health', (_, res) => {
   res.json({ status: 'ok', service: 'IGETAM API', version: '1.0.0' });
+});
+
+app.get('/check', (_, res) => {
+  const { execSync } = require('child_process');
+  try {
+    const path = execSync('which yt-dlp').toString().trim();
+    const version = execSync('yt-dlp --version').toString().trim();
+    res.json({ path, version, env: process.env.YTDLP_PATH });
+  } catch (e) {
+    res.json({ error: String(e), env: process.env.YTDLP_PATH });
+  }
 });
 
 app.listen(PORT, () => {
