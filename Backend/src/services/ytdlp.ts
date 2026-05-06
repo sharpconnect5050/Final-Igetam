@@ -111,7 +111,7 @@ export function streamDownload(
       url
     ];
 
-    const proc = spawn('yt-dlp', args);
+    const proc = spawn('/usr/local/bin/yt-dlp', args);
     let errOut = '';
 
     proc.stderr.on('data', (d) => (errOut += d.toString()));
