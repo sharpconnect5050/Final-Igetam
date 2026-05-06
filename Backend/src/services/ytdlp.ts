@@ -111,7 +111,8 @@ export function streamDownload(
       url
     ];
 
-    const proc = spawn('/usr/local/bin/yt-dlp', args);
+    const ytdlpPath = process.env.YTDLP_PATH || 'yt-dlp';
+const proc = spawn(ytdlpPath, args);
     let errOut = '';
 
     proc.stderr.on('data', (d) => (errOut += d.toString()));
