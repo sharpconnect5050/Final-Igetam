@@ -1,8 +1,5 @@
-import { spawn } from 'child_process';
+import youtubeDl from 'youtube-dl-exec';
 import { Response } from 'express';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 
 export interface VideoInfo {
   title: string;
@@ -36,122 +33,73 @@ function fmtDate(d: string): string {
   return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
 }
 
-export function getVideoInfo(url: string): Promise<VideoInfo> {
-  return new Promise((resolve, reject) => {
-    const args = ['--dump-json', '--no-playlist', '--no-warnings', url];
-    let out = '';
-    let err = '';
+export async function getVideoInfo(url: string): Promise<VideoInfo> {
+  const data = await youtubeDl(url, {
+    dumpSingleJson: true,
+    noPlaylist: true,
+    noWarnings: true,
+  }) as any;
 
-    const proc = spawn('yt-dlp', args);
-    proc.stdout.on('data', (d) => (out += d.toString()));
-    proc.stderr.on('data', (d) => (err += d.toString()));
-
-    proc.on('error', () =>
-      reject(new Error('yt-dlp not found. Install it: https://github.com/yt-dlp/yt-dlp'))
-    );
-
-    proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error(err || 'Failed to fetch video info'));
-      try {
-        const data = JSON.parse(out);
-        resolve({
-          title: data.title ?? 'Unknown',
-          thumbnail: data.thumbnail ?? '',
-          duration: data.duration ?? 0,
-          durationStr: fmtDuration(data.duration ?? 0),
-          channel: data.uploader ?? data.channel ?? 'Unknown',
-          viewCount: fmtViews(data.view_count ?? 0),
-          uploadDate: fmtDate(data.upload_date ?? ''),
-          platform: data.extractor_key ?? 'Web',
-          webpage_url: data.webpage_url ?? url,
-        });
-      } catch {
-        reject(new Error('Failed to parse video data'));
-      }
-    });
-  });
+  return {
+    title: data.title ?? 'Unknown',
+    thumbnail: data.thumbnail ?? '',
+    duration: data.duration ?? 0,
+    durationStr: fmtDuration(data.duration ?? 0),
+    channel: data.uploader ?? data.channel ?? 'Unknown',
+    viewCount: fmtViews(data.view_count ?? 0),
+    uploadDate: fmtDate(data.upload_date ?? ''),
+    platform: data.extractor_key ?? 'Web',
+    webpage_url: data.webpage_url ?? url,
+  };
 }
 
-export function streamDownload(
+export async function streamDownload(
   url: string,
   format: string,
   quality: string,
   res: Response
 ): Promise<void> {
+  const { spawn } = await import('child_process');
+  const ytdlpBin = require('youtube-dl-exec').raw;
+
+  let ytFmt: string;
+  let ext = 'mp4';
+  let mime = 'video/mp4';
+
+  if (format === 'mp3') {
+    ytFmt = 'bestaudio/best';
+    ext = 'mp3';
+    mime = 'audio/mpeg';
+  } else if (format === 'webm') {
+    ytFmt = `bestvideo[ext=webm][height<=${quality}]+bestaudio[ext=webm]/best[ext=webm]`;
+    ext = 'webm';
+    mime = 'video/webm';
+  } else {
+    ytFmt = `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${quality}]/best[height<=${quality}]`;
+  }
+
+  const args = [
+    '-f', ytFmt,
+    '--no-playlist',
+    '--no-warnings',
+    '--merge-output-format', ext,
+    '-o', '-',
+    url
+  ];
+
+  res.setHeader('Content-Disposition', `attachment; filename="igetam.${ext}"`);
+  res.setHeader('Content-Type', mime);
+
+  const proc = spawn(ytdlpBin, args);
+  proc.stdout.pipe(res);
+
   return new Promise((resolve, reject) => {
-    let ytFmt: string;
-    let ext = 'mp4';
-    let mime = 'video/mp4';
-    let audioArgs: string[] = [];
-
-    if (format === 'mp3') {
-      ytFmt = 'bestaudio/best';
-      ext = 'mp3';
-      mime = 'audio/mpeg';
-      audioArgs = ['--extract-audio', '--audio-format', 'mp3', '--audio-quality', '192K'];
-    } else if (format === 'webm') {
-      ytFmt = `bestvideo[ext=webm][height<=${quality}]+bestaudio[ext=webm]/bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]/best`;
-      ext = 'webm';
-      mime = 'video/webm';
-    } else {
-      ytFmt = `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]/best`;
-    }
-
-    const tmpDir = os.tmpdir();
-    const tmpFile = path.join(tmpDir, `igetam-${Date.now()}.${ext}`);
-
-    const args = [
-      '-f', ytFmt,
-      '--no-playlist',
-      '--no-warnings',
-      '--no-part',
-      ...audioArgs,
-      ...(format === 'mp3' ? [] : ['--merge-output-format', ext]),
-      '-o', tmpFile,
-      url
-    ];
-
-    const ytdlpPath = process.env.YTDLP_PATH || 'yt-dlp';
-const proc = spawn(ytdlpPath, args);
     let errOut = '';
-
-    proc.stderr.on('data', (d) => (errOut += d.toString()));
-
-    proc.on('error', () => {
-      fs.rmSync(tmpFile, { force: true });
-      reject(new Error('yt-dlp not found'));
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        fs.rmSync(tmpFile, { force: true });
-        return reject(new Error(errOut || 'Download failed'));
-      }
-
-      fs.stat(tmpFile, (statErr, stats) => {
-        if (statErr) {
-          fs.rmSync(tmpFile, { force: true });
-          return reject(new Error('Downloaded file not found'));
-        }
-
-        res.setHeader('Content-Disposition', `attachment; filename="igetam.${ext}"`);
-        res.setHeader('Content-Type', mime);
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('Content-Length', stats.size.toString());
-
-        const fileStream = fs.createReadStream(tmpFile);
-        fileStream.pipe(res);
-
-        fileStream.on('error', () => {
-          fs.rmSync(tmpFile, { force: true });
-          if (!res.headersSent) reject(new Error('File read error'));
-        });
-
-        fileStream.on('end', () => {
-          fs.rmSync(tmpFile, { force: true });
-          resolve();
-        });
-      });
+    proc.stderr.on('data', (d: Buffer) => (errOut += d.toString()));
+    proc.on('error', reject);
+    proc.on('close', (code: number) => {
+      if (code !== 0 && !res.headersSent) reject(new Error(errOut || 'Download failed'));
+      else resolve();
     });
   });
 }
